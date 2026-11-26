@@ -79,5 +79,28 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 实体版本历史与变更审批联动
+
+实体变更审批完成后，版本快照写入内部表 `entity_version`（不进运营概览），
+审批页与主数据实体页都可回看并领用：
+
+- `GET /api/entity_model/{id}/versions` 实体页版本历史：全部快照带生效依据，标注当前可领用版本。
+- `GET /api/entity_model/{id}/versions/{version}` 按版本号取快照，回看该结构曾经的状态和生效依据。
+- `POST /api/entity_model/{id}/versions/{version}/claim` 按版本发起办理：领用已生效快照，
+  生成以其为基线的新变更单并跳到审批页继续办理。
+- `GET /api/model_change/{id}/version_view` 审批页回看：本单关联定义（历史内容）与
+  当前可领用状态分开返回。
+- `GET /api/model_change/{id}/receipt` 按原确认取回执：返回该单实际采用的定义。
+- `POST /api/model_change/{id}/candidate` 更新本单候选定义（仅起草中/待审批/待重新核对）。
+
+变更单状态机：`起草中 → 待审批 → 已生效/已驳回`，另有 `待重新核对`（基线冲突）、
+`已代替`（同基线他单先生效）两个中间/终态；`恢复查证` 可把已驳回、已代替单据恢复为起草中，
+但不能自行切换成已生效。确认生效做基线核对且幂等：同一变更单重复确认只写入一份版本记录；
+确认后的实体快照只采用本单候选定义，不混入其他未确认单的字段。
+
+场景回归：`cd backend && ./run.sh` 起服务后执行
+`.venv/bin/python -I tests/scenario_versioning.py`（37 项断言，覆盖双单基线冲突、
+回执迟到、重新核对、v2 快照回看、按版本领用等）。
+
 领域：数据工程
 子方向：数仓与数据湖

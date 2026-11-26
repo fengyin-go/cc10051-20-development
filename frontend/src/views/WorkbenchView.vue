@@ -60,6 +60,24 @@
             >
               {{ action }}
             </button>
+            <button
+              v-if="meta.key === 'model_change'"
+              class="link"
+              type="button"
+              :data-testid="`version-view-${row.id}`"
+              @click="openVersionView(row)"
+            >
+              版本视图
+            </button>
+            <button
+              v-if="meta.key === 'entity_model'"
+              class="link"
+              type="button"
+              :data-testid="`versions-${row.id}`"
+              @click="openVersions(row)"
+            >
+              版本历史
+            </button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -86,6 +104,19 @@
       </form>
     </div>
 
+    <ChangeVersionModal
+      v-if="versionViewOrder"
+      :order="versionViewOrder"
+      @close="versionViewOrder = null"
+      @changed="reload"
+    />
+    <EntityVersionsModal
+      v-if="versionsEntity"
+      :entity="versionsEntity"
+      @close="versionsEntity = null"
+      @claimed="onClaimed"
+    />
+
     <footer class="page-foot">
       <span>共 {{ total }} 条{{ meta.name }}记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -95,6 +126,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
   createEntry,
@@ -104,9 +136,13 @@ import {
   runAction as applyAction,
 } from '@/api/backend-service'
 import type { EntryRow } from '@/data/types'
+import ChangeVersionModal from '@/views/ChangeVersionModal.vue'
+import EntityVersionsModal from '@/views/EntityVersionsModal.vue'
 
 const props = defineProps<{ moduleKey: string }>()
 const meta = moduleMeta(props.moduleKey)
+const route = useRoute()
+const router = useRouter()
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
@@ -115,6 +151,8 @@ const filterFields = meta.fields.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const versionViewOrder = ref<EntryRow | null>(null)
+const versionsEntity = ref<EntryRow | null>(null)
 const stats = computed(() => [
   { label: meta.metrics[0], value: total.value },
   { label: meta.metrics[1], value: rows.value.filter((row) => row.status === meta.statuses[1]).length },
@@ -170,9 +208,36 @@ async function runAction(action: string, row: EntryRow) {
   try {
     const result = await applyAction(meta.key, Number(row.id), action)
     if (!result.ok) throw new Error(result.message)
-    await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '操作失败'
+  } finally {
+    // 动作可能只改变服务端状态（如基线冲突转入待重新核对），无论成败都刷新列表
+    await reload()
+  }
+}
+
+function openVersionView(row: EntryRow) {
+  versionViewOrder.value = row
+}
+
+function openVersions(row: EntryRow) {
+  versionsEntity.value = row
+}
+
+function onClaimed(order: EntryRow) {
+  // 从实体页按版本发起办理后，跳到审批页继续办理新变更单
+  versionsEntity.value = null
+  void router.push({ path: '/model_change', query: { order: String(order.id) } })
+}
+
+function openFromQuery() {
+  if (meta.key === 'entity_model' && typeof route.query.versions === 'string') {
+    const row = rows.value.find((item) => item.实体编码 === route.query.versions)
+    if (row) openVersions(row)
+  }
+  if (meta.key === 'model_change' && typeof route.query.order === 'string') {
+    const row = rows.value.find((item) => String(item.id) === route.query.order)
+    if (row) openVersionView(row)
   }
 }
 
@@ -187,5 +252,8 @@ async function reload() {
   }
 }
 
-onMounted(reload)
+onMounted(async () => {
+  await reload()
+  openFromQuery()
+})
 </script>

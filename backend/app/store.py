@@ -1,22 +1,27 @@
 """内存数据仓库：给每个业务模块准备一份可筛选、可流转的示例数据。
 
 真实项目里这里会换成数据库访问层；当前实现只依赖标准库，保证克隆下来就能起。
+实体版本快照等内部表不参与运营概览统计。
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from app.seed import SEED_ROWS
 
 
 class Store:
+    # 内部表：支撑版本历史等跨模块能力，不当作业务模块出现在概览里
+    INTERNAL_TABLES = {"entity_version"}
+
     def __init__(self) -> None:
         self._tables: dict[str, list[dict[str, Any]]] = {
-            name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
+            name: [deepcopy(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
 
     def module_names(self) -> list[str]:
-        return sorted(self._tables)
+        return sorted(name for name in self._tables if name not in self.INTERNAL_TABLES)
 
     def rows(self, module: str) -> list[dict[str, Any]]:
         return self._tables.setdefault(module, [])
